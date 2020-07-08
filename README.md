@@ -2,6 +2,98 @@
 
 # Cambridge Coffee Pot
 
+## Introduction
+
+There is slightly more to this project than perhaps meets the eye. The motivation is to explore issues
+likely to be highly relevant as we expand the 'urban sensor' activities from the regional SmartCambridge
+initiative into the more detailed in-building sensing required in our partnership with the Centre for Digital
+Built Britain. 
+
+The Smart City agenda requires robust sensors deployed at scale across a large region and much
+of the work is dominated by ingesting data from existing sources which provide relatively inflexible 
+interfaces and poor support for real-time data collection and analysis. We may (and do) use neural-network
+based image sensors in the region (see
+[how we used them to measure the lockdown effect](https://www.cl.cam.ac.uk/~ijl20/cambridge_lockdown.html))
+but from a 'sensor deployment' standpoint these real-world CNN/ML cameras have similar challenges to dumber 
+sensors (like car park barriers) with less sophisticated internals.
+
+The collaboration with the Centre for Digital Built Britain requires more innovation in the actual sensor
+design and deployment, while also allowing us to design these from the ground up to provide data amenable
+to real-time collection and analysis.
+
+The *spatial* nature of sensor data (e.g. *where* was the CO2 sensor when it recorded an all-time high) is
+always recorded but the *temporal* nature of the readings is traditionally given insufficient emphasis. In part this 
+is because it is common for data to be collected in a given time period and analyzed retrospectively. Our intent
+is to analyze the incoming data as it arrives in real-time including recognizing patterns, making predictions and 
+taking actions.
+
+So a detailed consideration of the temporal implications is required, and it is worth highlighting a small number
+of key concepts (such as *time, timeliness, latency, real-time, event, readings, sensor fusion*):
+
+*time*: there is one *time* fundamentally important for most sensor readings, that is the *time most 
+suitable to be associated with the sensor reading*. For example, a sensor that is counting people it can see in
+an image frame would most sensibly use the time the picture was taken. Note there are many different times the sensor
+could send with their data (the time the object detection process completed, the time the data was sent from the
+sensor, the time the receiving platform received the data) and we wish to collect most of these, but the sensor
+reading time is *special* and we take special care of that (and normalize to a defined field called `acp_ts` to 
+store the microsecond timestamp for that value). Most sensors neither know the time nor transmit it in their data,
+assuming the receiving end will add a timestamp if it is interested. Some sensors simply transmit an erroneous
+approximate time as if it is not important (e.g. time included in the common bus position transmitters
+used in the UK, even though a GPS was obviously used to get the lat/lng).
+
+*timeliness*: this is the human/physical timescale relevant to the thing being measured or the conclusions likely
+to be drawn from an incremental reading. For example, a CO2 reading cannot be taken instantaneously, there is some
+natural timescale over which the reading will be accumulated. On a more subtle point, traffic speed for a *highway*
+is actually meaningless, the underlying data source is the movement of individual vehicles and it takes a certain
+amount of time to decide a reasonable value. It even takes a certain amount of time for a car to enter a parking lot
+so the timestamp of a 'car entry' event is somewhat subjective. On a more important point, a modern camera-based
+sensor on a highway, in addition to reporting traffic loads and speeds may be able to recognize a car crash. The
+temporal questions are fundamentally when in the complex sequence of event was it correct to report that a crash
+had occurred (or was inevitable) and how long did it take the sensor to recognise and report it. The most complex
+aspect of timeliness is the timescale over which appropriate action should be taken given the sensor reading, and
+the events or spatiotemporal situation preceding it. For a (real) example on a highway, if a crash occurs blocking
+every lane in one direction, what is a reasonable amount of time for the infrastructure to respond to mitigate the
+impact on other road users? To set the benchmark here in late December 2019, after a similar crash I witnessed on
+one of the UK's main highways, the delay before the complete closure of the highway was reported on Google Maps
+was 8 minutes.
+
+*latency*: this is simply the computer/network/programmer introduced delay between a sensor reading being valid and
+that data appearing downstream in the system at the intented destination. There are two key issue here: (i) the
+latency introduced by the *network* tends to get measured up the wazoo, even though in current systems this is often
+the least of the issues. (ii) essentially *all* latency today is due to inadequate systems design, for example data
+is typically collected and stored, and then polled at an acceptable frequency from those stored sources. This applies
+as equally to real-world infrastructure in cities as with development systems in university research. To collect
+data from a real building management system the starting point for negotiation will be once-every-24-hours, introducing
+an immediate 86400-second latency into the data even though the readings might be on a 30-second granularity.
+
+*real-time*: for us (and Investment Banking) this simply means asynchronous push protocols are used *throughout*
+the system. This means the systems are typically low latency (latency can be any figure so long as it is consistent
+with the required timeliness) but there are *not* artificially introduced delays (such as polling for a sensor reading
+or updating a web page periodically). In consequence the processing tends to be event-driven, i.e. an individual sensor
+reading can be the catalyst for an action such as closing a vent (or calling emergency services) even though the
+decision is based on cumulative state built up over a number of sensor readings from multiple sources. Note we do not
+use the term *real-time* to refer to the fact that each sensor reading simply has a *time*, reagrdless of how accurate or
+otherwise that is. Sensor readings with timestamps can be stored in a time-series database and rendered in time/value plots,
+but in our terminology that is a traditional request-response system, not a real-time platform.
+
+*event* vs. *status reading*: Most sensors send their data on a regular period, e.g. once every 20 seconds (current bus position data
+in the UK) or every 5 minutes (the car park occupancy figures we collect). It is possible to configure some sensors to
+proactively send a reading immediately if set conditions are met (e.g. the basic reading has changed by a percentage) although
+this is far from common. We refer to these periodic reports as *status readings*. The period used is typically decided by the
+sensor programmer to make cost effective use of other infrastructure (such as energy, network or storage usage) rather than
+being related to some physical constant (although some sensors, such as particulates, may be limited by the time it takes for
+them to come up with a reliable measure). Note that sensor data systems build around a storage system are relatively insensitive
+to the latency introduced by a fixed time period for the sensor readings and as a consequence tend to be less interested in the
+possibilities introduced by low-latency proactive messages from the sensor. We refer to these proactive messages as *events* which
+in the simplest case can be, for example, "electrical energy use readings have just increased above a defined threshold". However,
+the significance of events becomes more apparent with a more intelligent sensor (or combination of sensors connected to a *node*),
+for example "a highway crash is occurring".
+
+*sensor fusion*: In our work, this is intelligently combining spatiotemporal data from multiple hetergeneous sensors such that
+meaningful events can be *derived* from the incoming readings (and events) and communicated to the host plaform. In the case of the
+Cambridge Coffee Pot, this crucially includes "I think we'll soon have a fresh pot of coffee".
+
+## The Coffee Pot
 Back in the day (1991) we had this coffee pot with a low-res monochrome camera connected to
 a frame-grabber and a server in the Computer Laboratory, then in the Austin Building in central
 Cambridge.  We could type the command ```xcoffee``` on our workstations and decide whether to make
